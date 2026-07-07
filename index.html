@@ -974,15 +974,27 @@ function buildXlsx(c){
       row.getCell(2).value = gi===0 ? (idx+1) : null;
       row.getCell(3).value = gi===0 ? `${idx+1}/${c.strips.length}` : '';
       row.getCell(4).value = g.base;
+      row.getCell(4).font = {bold:true};
       row.getCell(5).value = g.qty;
+      row.getCell(5).font = {bold:true};
       row.getCell(6).value = +s.total.toFixed(2);
       row.getCell(6).numFmt = '0.00';
       row.getCell(7).value = +requiredLen.toFixed(2);
       row.getCell(7).numFmt = '0.00';
       row.getCell(7).font = {bold:true};
-      row.getCell(8).value = [...g.vls].filter(Boolean).join(', ');
+      const vlArr = [...g.vls].filter(Boolean);
+      row.getCell(8).value = vlArr.join(', ');
+      // farebné zvýraznenie rozmeru podľa výrobného listu (rovnaká paleta ako v appke)
+      if(vlArr.length){
+        const argb = 'FF' + vlColor(vlArr[0]).replace('#','').toUpperCase();
+        [4,8].forEach(ci=>{
+          row.getCell(ci).fill = {type:'pattern', pattern:'solid', fgColor:{argb}};
+        });
+      }
       r++;
     });
+    // jeden prázdny riadok medzi balíkmi (medzi 1. a 2. balíkom atď.)
+    if(idx < c.strips.length-1){ r++; }
   });
   const lastDataRow = r-1;
   if(lastDataRow>=firstDataRow){
@@ -1019,6 +1031,17 @@ function buildXlsx(c){
     if(rozdiel!==0) mismatchIdx++;
     const row = ws2.addRow({ a: rozdiel!==0?mismatchIdx:'', rozmer:len, sucet, objednane, rozdiel });
     if(rozdiel!==0) row.eachCell(cell=>{ cell.font = {color:{argb:'FFFF6B6B'}, bold:true}; });
+  });
+
+  // ================= písmo Arial 14 pre celý zošit =================
+  // aplikuje sa nakoniec, aby zachovalo už nastavené tučné písmo, farby a zarovnanie
+  [ws1, ws2].forEach(ws=>{
+    ws.eachRow(row=>{
+      row.eachCell({includeEmpty:false}, cell=>{
+        const f = cell.font || {};
+        cell.font = { ...f, name:'Arial', size: Math.max(14, f.size||0) };
+      });
+    });
   });
 
   // ================= stiahnutie =================
