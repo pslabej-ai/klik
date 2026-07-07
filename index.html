@@ -1040,6 +1040,9 @@ function buildXlsx(c){
       row.eachCell({includeEmpty:false}, cell=>{
         const f = cell.font || {};
         cell.font = { ...f, name:'Arial', size: Math.max(14, f.size||0) };
+        // vycentrovanie všetkých nápisov (zachová otočenie textu napr. pri stĺpci TYP)
+        const a = cell.alignment || {};
+        cell.alignment = { ...a, horizontal:'center', vertical:'middle', wrapText:true };
       });
     });
   });
