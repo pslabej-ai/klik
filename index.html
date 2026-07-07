@@ -1157,9 +1157,10 @@ function exportPdf(c){
 <title>KLIK PANEL — delenie materiálu</title>
 <style>
   @page { size: A4 portrait; margin: 8mm; }
-  * { box-sizing:border-box; }
+  * { box-sizing:border-box; -webkit-print-color-adjust:exact; print-color-adjust:exact; }
   html,body { margin:0; padding:0; }
-  body { font-family: Arial, sans-serif; color:#000; }
+  body { font-family: Arial, sans-serif; color:#000;
+    -webkit-print-color-adjust:exact; print-color-adjust:exact; }
   .sheet { width:194mm; margin:0 auto; }
   .meta { width:100%; border-collapse:collapse; margin-bottom:2px; }
   .meta td { padding:1px 4px; font-size:13px; }
@@ -1176,11 +1177,14 @@ function exportPdf(c){
   table.main td.r { text-align:right; }
   table.main td.b { font-weight:bold; }
   table.main tr.gap td { border:none; height:10px; }
-  td.typ { text-align:center; vertical-align:middle; font-weight:bold; width:8mm; }
-  td.typ span { writing-mode:vertical-rl; transform:rotate(180deg); white-space:nowrap; }
-  /* šírky stĺpcov ~ ako v Exceli */
-  col.w-balik{width:12mm} col.w-ozn{width:20mm} col.w-rozmer{width:20mm}
-  col.w-pocet{width:28mm} col.w-balikbm{width:20mm} col.w-rez{width:24mm} col.w-vl{width:28mm}
+  /* úzky pruh "ZAHNUTÁ HRANA" len pri okraji */
+  td.typ { text-align:center; vertical-align:middle; font-weight:bold; padding:0; }
+  td.typ span { writing-mode:vertical-rl; transform:rotate(180deg); white-space:nowrap;
+    font-size:9px; letter-spacing:.5px; }
+  /* šírky stĺpcov ~ ako v Exceli; TYP je úzky okrajový pruh */
+  col.w-typ{width:6mm}
+  col.w-balik{width:14mm} col.w-ozn{width:22mm} col.w-rozmer{width:22mm}
+  col.w-pocet{width:30mm} col.w-balikbm{width:22mm} col.w-rez{width:26mm} col.w-vl{width:30mm}
 </style></head><body>
 <div class="sheet">
   <table class="meta">
