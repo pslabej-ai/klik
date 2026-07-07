@@ -33,28 +33,15 @@ Dáta sa priebežne ukladajú do pamäte prehliadača (localStorage), takže po 
 a znovuotvorení súboru zostanú zachované (pokiaľ ho otváraš z toho istého miesta
 v tom istom prehliadači).
 
-## Štruktúra repozitára (pre ďalší vývoj)
+## Štruktúra repozitára
 
-| Súbor / priečinok | Účel |
-|---|---|
-| `index.html` | **Hotový produkt** — vygenerovaný jednosúborový balík, ten sa reálne používa. |
-| `index.template.html` | Zdrojová kostra HTML/CSS (bez knižníc a `app.js`). |
-| `app.js` | Zdrojový kód logiky aplikácie (kalkulačka, OCR, export). |
-| `lib/` | Zdrojové tretie strany: ExcelJS, Tesseract.js (OCR) + WASM jadro + jazykové dáta, PDF.js. |
-| `build.mjs` | Build skript — poskladá `index.template.html` + `app.js` + `lib/` do finálneho `index.html`. |
+Repozitár obsahuje jediný súbor aplikácie: **`index.html`**. Je to zároveň zdrojový
+aj hotový súbor — všetky ďalšie úpravy sa robia priamo v ňom, žiadny build krok
+už nie je potrebný.
 
-### Ako upraviť a znova vygenerovať `index.html`
-
-1. Uprav `app.js` (logika) alebo `index.template.html` (vzhľad/HTML).
-2. Spusti:
-   ```
-   node build.mjs
-   ```
-3. Prepíše sa `index.html` — to je súbor, ktorý sa reálne používa/posiela ďalej.
-
-`app.js` funguje aj samostatne (mimo balíka), pri vývoji sa dá otvárať pôvodný
-viac-súborový režim priamo cez `index.template.html` + `<script src="app.js">`
-a súbory v `lib/`.
+(Staršia verzia repozitára mala kód rozdelený do `app.js` + `index.template.html` +
+`lib/` s build skriptom, ktorý ich skladal do `index.html`. Tie súbory boli odstránené —
+`index.html` je teraz jediný zdroj pravdy.)
 
 ### Prečo je výsledný súbor taký veľký
 
