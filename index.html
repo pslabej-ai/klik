@@ -1059,14 +1059,14 @@ function buildXlsx(c){
     });
   });
 
-  // ================= tlač: zmestiť na jednu stranu A4 na šírku =================
+  // ================= tlač: zmestiť celé na jednu stranu A4 =================
   [ws1, ws2].forEach(ws=>{
     ws.pageSetup = {
       paperSize: 9,              // A4
       orientation: 'portrait',
       fitToPage: true,
       fitToWidth: 1,             // všetky stĺpce na 1 stranu na šírku
-      fitToHeight: 0,            // výška podľa potreby (viac strán zvisle je OK)
+      fitToHeight: 1,            // celá tabuľka na 1 stranu aj na výšku
       horizontalCentered: true,
       margins: { left:0.3, right:0.3, top:0.4, bottom:0.4, header:0.2, footer:0.2 }
     };
