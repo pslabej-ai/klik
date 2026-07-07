@@ -918,9 +918,9 @@ function buildXlsx(c){
   // Rozvrhnutie podľa vzoru "KLIK PANEL delenie materiálu": TYP / Balík / Označenie / Rozmer / Počet v balíku / balík / s rezervou.
   const ws1 = wb.addWorksheet('Prepočet zvitkov');
   ws1.columns = [
-    {key:'typ', width:8}, {key:'balik', width:8}, {key:'oznacenie', width:12},
-    {key:'rozmer', width:12}, {key:'pocet', width:16}, {key:'balikBm', width:12},
-    {key:'sRezervou', width:13}, {key:'vl', width:18},
+    {key:'typ', width:10}, {key:'balik', width:8}, {key:'oznacenie', width:12},
+    {key:'rozmer', width:12}, {key:'pocet', width:18}, {key:'balikBm', width:12},
+    {key:'sRezervou', width:14}, {key:'vl', width:16},
   ];
 
   const modeLabel = c.mode===1 ? 'VÝROBA Z TABUĽKY PC' : 'VÝROBA V RUČNOM REŽIME';
@@ -1041,9 +1041,6 @@ function buildXlsx(c){
       row.eachCell({includeEmpty:false}, cell=>{
         const f = cell.font || {};
         cell.font = { ...f, name:'Arial', size: Math.max(14, f.size||0) };
-        // vycentrovanie všetkých nápisov (zachová otočenie textu napr. pri stĺpci TYP)
-        const a = cell.alignment || {};
-        cell.alignment = { ...a, horizontal:'center', vertical:'middle', wrapText:true };
       });
     });
   });
