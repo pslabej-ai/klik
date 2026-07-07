@@ -917,10 +917,12 @@ function buildXlsx(c){
   // ================= List 1: PREPOČET ZVITKOV =================
   // Rozvrhnutie podľa vzoru "KLIK PANEL delenie materiálu": TYP / Balík / Označenie / Rozmer / Počet v balíku / balík / s rezervou.
   const ws1 = wb.addWorksheet('Prepočet zvitkov');
+  // šírky stĺpcov prispôsobené nápisom v hlavičke pri písme Arial 14 (tučné),
+  // aby bol každý nápis v 6. riadku celý viditeľný
   ws1.columns = [
-    {key:'typ', width:10}, {key:'balik', width:8}, {key:'oznacenie', width:12},
-    {key:'rozmer', width:12}, {key:'pocet', width:18}, {key:'balikBm', width:12},
-    {key:'sRezervou', width:14}, {key:'vl', width:16},
+    {key:'typ', width:12}, {key:'balik', width:10}, {key:'oznacenie', width:16},
+    {key:'rozmer', width:14}, {key:'pocet', width:20}, {key:'balikBm', width:12},
+    {key:'sRezervou', width:17}, {key:'vl', width:20},
   ];
 
   const modeLabel = c.mode===1 ? 'VÝROBA Z TABUĽKY PC' : 'VÝROBA V RUČNOM REŽIME';
