@@ -329,6 +329,10 @@ if(typeof pdfjsLib !== 'undefined'){
 // spustí OCR na danom zdroji (File alebo canvas/dataURL) a vráti text
 async function ocrRecognize(src, status){
   const { data } = await Tesseract.recognize(src, 'slk+eng', {
+    workerPath: 'lib/worker.min.js',
+    corePath: 'lib/tesseract-core',
+    langPath: 'lib/lang-data',
+    gzip: true,
     logger: m => {
       if(m.status==='recognizing text'){
         status.innerHTML = `<span class="spin"></span> Rozpoznávam text… ${Math.round(m.progress*100)} %`;
