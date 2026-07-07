@@ -322,8 +322,15 @@ function parseMultiVL(text){
 
 // nastavenie workera pre pdf.js (ak je knižnica prítomná)
 // pdf.js môže byť vystavený ako window.pdfjsLib (legacy) — s tým pracujeme
+// V EMBEDDED móde (jeden HTML súbor) sú workery vložené priamo v EMBEDDED_ASSETS
+// ako blob URL; mimo neho (viac-súborový dev režim) sa použijú súbory z lib/.
 if(typeof pdfjsLib !== 'undefined'){
-  try{ pdfjsLib.GlobalWorkerOptions.workerSrc = 'lib/pdf.worker.min.js'; }catch(e){}
+  try{
+    pdfjsLib.GlobalWorkerOptions.workerSrc =
+      (typeof EMBEDDED_ASSETS !== 'undefined')
+        ? EMBEDDED_ASSETS.pdfWorkerBlobUrl()
+        : 'lib/pdf.worker.min.js';
+  }catch(e){}
   // ak worker súbor chýba, pdf.js vie bežať aj bez neho (pomalšie) — vypneme worker
   try{
     if(pdfjsLib.GlobalWorkerOptions && !pdfjsLib.GlobalWorkerOptions.workerSrc){
@@ -334,10 +341,11 @@ if(typeof pdfjsLib !== 'undefined'){
 
 // spustí OCR na danom zdroji (File alebo canvas/dataURL) a vráti text
 async function ocrRecognize(src, status){
+  const opts = (typeof EMBEDDED_ASSETS !== 'undefined')
+    ? { workerPath: EMBEDDED_ASSETS.tesseractWorkerBlobUrl(), workerBlobURL: false, corePath: 'embedded-core', langPath: 'embedded-lang' }
+    : { workerPath: 'lib/worker.min.js', corePath: 'lib/tesseract-core', langPath: 'lib/lang-data' };
   const { data } = await Tesseract.recognize(src, 'slk+eng', {
-    workerPath: 'lib/worker.min.js',
-    corePath: 'lib/tesseract-core',
-    langPath: 'lib/lang-data',
+    ...opts,
     gzip: true,
     logger: m => {
       if(m.status==='recognizing text'){
