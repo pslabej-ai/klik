@@ -917,17 +917,26 @@ function buildXlsx(c){
   // ================= List 1: PREPOČET ZVITKOV =================
   // Rozvrhnutie podľa vzoru "KLIK PANEL delenie materiálu": TYP / Balík / Označenie / Rozmer / Počet v balíku / balík / s rezervou.
   const ws1 = wb.addWorksheet('Prepočet zvitkov');
+
+  // stĺpec "Výrobný list" má zmysel len pri viac ako jednom výrobnom liste;
+  // ak je zákazka z jedného VL (alebo bez VL), stĺpec sa vynechá
+  const vlDistinct = [...new Set(c.items.map(it=>it.vl).filter(Boolean))];
+  const showVl = vlDistinct.length > 1;
+  const lastCol = showVl ? 'H' : 'G';
+
   // šírky stĺpcov prispôsobené nápisom v hlavičke pri písme Arial 14 (tučné),
   // aby bol každý nápis v 6. riadku celý viditeľný
-  ws1.columns = [
+  const cols = [
     {key:'typ', width:12}, {key:'balik', width:10}, {key:'oznacenie', width:16},
     {key:'rozmer', width:14}, {key:'pocet', width:20}, {key:'balikBm', width:12},
-    {key:'sRezervou', width:17}, {key:'vl', width:20},
+    {key:'sRezervou', width:17},
   ];
+  if(showVl) cols.push({key:'vl', width:20});
+  ws1.columns = cols;
 
   const modeLabel = c.mode===1 ? 'VÝROBA Z TABUĽKY PC' : 'VÝROBA V RUČNOM REŽIME';
   ws1.getCell('A1').value = 'REŽIM VÝROBY'; ws1.getCell('A1').font = {bold:true, size:13};
-  ws1.mergeCells('D1:H1');
+  ws1.mergeCells(`D1:${lastCol}1`);
   ws1.getCell('D1').value = modeLabel;
   ws1.getCell('D1').font = {bold:true, size:13};
   ws1.getCell('D1').alignment = {horizontal:'center'};
@@ -940,7 +949,7 @@ function buildXlsx(c){
   ws1.getCell('A3').value = 'Delenie'; ws1.getCell('A3').font = {bold:true, size:13};
   ws1.getCell('D3').value = c.delenie;
 
-  ws1.mergeCells('A4:H4');
+  ws1.mergeCells(`A4:${lastCol}4`);
   ws1.getCell('A4').value = 'KLIK PANEL - DELENIE MATERIÁLU';
   ws1.getCell('A4').font = {bold:true, size:14, color:{argb:'FFEAF3FA'}};
   ws1.getCell('A4').alignment = {horizontal:'center'};
@@ -958,7 +967,9 @@ function buildXlsx(c){
   ws1.getCell('F5').alignment = {horizontal:'right'};
 
   const hdr = ws1.getRow(6);
-  hdr.values = ['TYP','Balík','Označenie','Rozmer','Počet v balíku','balík','/s rezervou','Výrobný list'];
+  const hdrVals = ['TYP','Balík','Označenie','Rozmer','Počet v balíku','balík','/s rezervou'];
+  if(showVl) hdrVals.push('Výrobný list');
+  hdr.values = hdrVals;
   hdr.eachCell(cell=>{ cell.font = {bold:true}; cell.alignment = {horizontal:'center'}; });
 
   let r = 7;
@@ -986,11 +997,12 @@ function buildXlsx(c){
       row.getCell(7).numFmt = '0.00';
       row.getCell(7).font = {bold:true};
       const vlArr = [...g.vls].filter(Boolean);
-      row.getCell(8).value = vlArr.join(', ');
+      if(showVl) row.getCell(8).value = vlArr.join(', ');
       // farebné zvýraznenie rozmeru podľa výrobného listu (rovnaká paleta ako v appke)
       if(vlArr.length){
         const argb = 'FF' + vlColor(vlArr[0]).replace('#','').toUpperCase();
-        [4,8].forEach(ci=>{
+        const colorCells = showVl ? [4,8] : [4];
+        colorCells.forEach(ci=>{
           row.getCell(ci).fill = {type:'pattern', pattern:'solid', fgColor:{argb}};
         });
       }
@@ -1045,6 +1057,19 @@ function buildXlsx(c){
         cell.font = { ...f, name:'Arial', size: Math.max(14, f.size||0) };
       });
     });
+  });
+
+  // ================= tlač: zmestiť na jednu stranu A4 na šírku =================
+  [ws1, ws2].forEach(ws=>{
+    ws.pageSetup = {
+      paperSize: 9,              // A4
+      orientation: 'portrait',
+      fitToPage: true,
+      fitToWidth: 1,             // všetky stĺpce na 1 stranu na šírku
+      fitToHeight: 0,            // výška podľa potreby (viac strán zvisle je OK)
+      horizontalCentered: true,
+      margins: { left:0.3, right:0.3, top:0.4, bottom:0.4, header:0.2, footer:0.2 }
+    };
   });
 
   // ================= stiahnutie =================
