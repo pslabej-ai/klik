@@ -232,7 +232,7 @@
     <h2>Rozdelenie na pásy (delenie zvitku)</h2>
     <div id="cutlist"><div style="color:var(--muted);font-size:.85rem">Zatiaľ žiadne dáta.</div></div>
     <div class="btnrow no-print">
-      <button class="btn" id="print">🖨 Tlač / uložiť PDF</button>
+      <button class="btn" id="exportPdf">📄 Export do PDF (tabuľka)</button>
       <button class="btn blue" id="exportXlsx">📊 Export do Excelu (.xlsx)</button>
     </div>
     <div class="warnbanner hidden" id="xlsxWarn" style="margin-top:10px">
@@ -588,7 +588,10 @@ function demo(){
 $('#addRow').onclick = ()=>{ newRow(); refresh(); };
 $('#demo').onclick = demo;
 $('#clear').onclick = ()=>{ rowsEl.innerHTML=''; vlColorMap={}; newRow(); refresh(); };
-$('#print').onclick = ()=> window.print();
+$('#exportPdf').onclick = ()=>{
+  if(!lastCalc || !lastCalc.items.length){ alert('Najprv zadaj rozmery.'); return; }
+  exportPdf(lastCalc);
+};
 ['mode','delenie','masterW','splits','usefulW','bend'].forEach(id=>
   $('#'+id).addEventListener('input', refresh));
 
@@ -1087,6 +1090,126 @@ function buildXlsx(c){
   }).catch(err=>{
     alert('Chyba pri vytváraní Excelu: '+err.message);
   });
+}
+
+// ================= EXPORT PDF =================
+// Vytvorí presne takú tabuľku ako Excel export (rovnaké rozloženie, farby,
+// tučné stĺpce, prázdny riadok medzi balíkmi) v HTML a otvorí tlačový dialóg,
+// kde ju používateľ uloží ako PDF na jednej strane A4.
+function exportPdf(c){
+  const esc = s => String(s==null?'':s).replace(/[&<>]/g, m=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[m]));
+  const num = (n,d=2)=> (isFinite(n)?n:0).toLocaleString('sk-SK',{minimumFractionDigits:d,maximumFractionDigits:d});
+
+  const vlDistinct = [...new Set(c.items.map(it=>it.vl).filter(Boolean))];
+  const showVl = vlDistinct.length > 1;
+  const modeLabel = c.mode===1 ? 'VÝROBA Z TABUĽKY PC' : 'VÝROBA V RUČNOM REŽIME';
+  const typLabel = c.bend>0 ? 'ZAHNUTÁ HRANA' : 'BEZ OHYBU ODKVAPOVEJ HRANY';
+
+  // zoskupenie rovnaké ako v Exceli
+  const groups = c.strips.map(s=>{
+    const gm = new Map();
+    s.items.forEach(it=>{
+      const k = it.base;
+      if(gm.has(k)){ const g=gm.get(k); g.qty++; g.vls.add(it.vl||''); }
+      else gm.set(k, {base:it.base, qty:1, vls:new Set([it.vl||''])});
+    });
+    return { rows:[...gm.values()].sort((a,b)=>b.base-a.base), total:s.total, req:s.total + c.reserveM + c.delenieAdj };
+  });
+  const totalDataRows = groups.reduce((a,g)=>a+g.rows.length,0) + Math.max(0, groups.length-1);
+
+  const colCount = showVl ? 8 : 7;
+
+  // telo tabuľky
+  let body = '';
+  let typPlaced = false;
+  groups.forEach((g, si)=>{
+    g.rows.forEach((row, gi)=>{
+      const vlArr = [...row.vls].filter(Boolean);
+      const col = vlArr.length ? vlColor(vlArr[0]) : '';
+      const dimStyle = col ? `background:${col};` : '';
+      let tds = '';
+      if(!typPlaced){
+        tds += `<td class="typ" rowspan="${totalDataRows}"><span>${esc(typLabel)}</span></td>`;
+        typPlaced = true;
+      }
+      tds += `<td class="c">${gi===0 ? (si+1) : ''}</td>`;                       // Balík
+      tds += `<td class="c">${gi===0 ? `${si+1}/${c.strips.length}` : ''}</td>`;  // Označenie
+      tds += `<td class="c b" style="${dimStyle}">${row.base}</td>`;              // Rozmer
+      tds += `<td class="c b">${row.qty}</td>`;
+      tds += `<td class="r">${num(g.total)}</td>`;
+      tds += `<td class="r b">${num(g.req)}</td>`;
+      if(showVl) tds += `<td class="c" style="${dimStyle}">${esc(vlArr.join(', '))}</td>`;
+      body += `<tr>${tds}</tr>`;
+    });
+    if(si < groups.length-1){
+      // prázdny riadok medzi balíkmi (TYP stĺpec je pokrytý rowspanom)
+      let empt = '';
+      for(let k=0;k<colCount-1;k++) empt += `<td>&nbsp;</td>`;
+      body += `<tr class="gap">${empt}</tr>`;
+    }
+  });
+
+  const headCells = ['TYP','Balík','Označenie','Rozmer','Počet v balíku','balík','/s rezervou']
+    .concat(showVl?['Výrobný list']:[])
+    .map(h=>`<th>${esc(h)}</th>`).join('');
+
+  const html = `<!DOCTYPE html><html lang="sk"><head><meta charset="UTF-8">
+<title>KLIK PANEL — delenie materiálu</title>
+<style>
+  @page { size: A4 portrait; margin: 8mm; }
+  * { box-sizing:border-box; }
+  html,body { margin:0; padding:0; }
+  body { font-family: Arial, sans-serif; color:#000; }
+  .sheet { width:194mm; margin:0 auto; }
+  .meta { width:100%; border-collapse:collapse; margin-bottom:2px; }
+  .meta td { padding:1px 4px; font-size:13px; }
+  .meta .lbl { font-weight:bold; }
+  .titlebar { background:#1D465F; color:#EAF3FA; font-weight:bold; font-size:14px;
+    text-align:center; padding:4px; }
+  .celkom { width:100%; border-collapse:collapse; }
+  .celkom td { padding:1px 4px; font-size:13px; font-weight:bold; }
+  .celkom .area { background:#FFFF66; text-align:right; }
+  table.main { width:100%; border-collapse:collapse; margin-top:2px; table-layout:fixed; }
+  table.main th, table.main td { border:1px solid #2A5877; font-size:13px; padding:2px 4px; }
+  table.main th { background:#1D465F; color:#EAF3FA; text-align:center; font-weight:bold; }
+  table.main td.c { text-align:center; }
+  table.main td.r { text-align:right; }
+  table.main td.b { font-weight:bold; }
+  table.main tr.gap td { border:none; height:10px; }
+  td.typ { text-align:center; vertical-align:middle; font-weight:bold; width:8mm; }
+  td.typ span { writing-mode:vertical-rl; transform:rotate(180deg); white-space:nowrap; }
+  /* šírky stĺpcov ~ ako v Exceli */
+  col.w-balik{width:12mm} col.w-ozn{width:20mm} col.w-rozmer{width:20mm}
+  col.w-pocet{width:28mm} col.w-balikbm{width:20mm} col.w-rez{width:24mm} col.w-vl{width:28mm}
+</style></head><body>
+<div class="sheet">
+  <table class="meta">
+    <tr><td class="lbl">REŽIM VÝROBY</td><td></td><td></td><td style="text-align:center;font-weight:bold">${esc(modeLabel)}</td></tr>
+    <tr><td class="lbl">Rezerva materiálu</td><td></td><td></td><td>${num(c.reserveM)} m</td></tr>
+    <tr><td class="lbl">Delenie</td><td></td><td></td><td>${esc(c.delenie)}</td></tr>
+  </table>
+  <div class="titlebar">KLIK PANEL - DELENIE MATERIÁLU</div>
+  <table class="celkom">
+    <tr><td>CELKOM:</td><td>už.š.</td><td>${num(c.bm*0.5)}</td><td class="area">${num(c.area)} m2</td></tr>
+  </table>
+  <table class="main">
+    <colgroup>
+      <col class="w-typ"><col class="w-balik"><col class="w-ozn"><col class="w-rozmer">
+      <col class="w-pocet"><col class="w-balikbm"><col class="w-rez">${showVl?'<col class="w-vl">':''}
+    </colgroup>
+    <thead><tr>${headCells}</tr></thead>
+    <tbody>${body}</tbody>
+  </table>
+</div>
+<script>
+  window.onload = function(){ window.focus(); window.print(); };
+  window.onafterprint = function(){ window.close(); };
+</` + `script>
+</body></html>`;
+
+  const w = window.open('', '_blank');
+  if(!w){ alert('Nepodarilo sa otvoriť okno na tlač PDF. Povoľ vyskakovacie okná.'); return; }
+  w.document.open(); w.document.write(html); w.document.close();
 }
 
 </script>
