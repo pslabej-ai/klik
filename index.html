@@ -567,7 +567,8 @@ function load(){
     let uw = d.usefulW || 536;
     if(String(uw)==='500') uw = 536;
     $('#usefulW').value=uw; $('#bend').value=d.bend||0.046;
-    (d.items||[]).forEach(r=> newRow(r.vl||'', r.name,r.len,r.qty));
+    // POZN.: rozmery (items) sa zámerne NEobnovujú — súbor sa vždy otvorí s prázdnou
+    // tabuľkou rozmerov. Pamätajú sa len nastavenia výroby (šírky, režim, ohyb).
   }
   if(!rowsEl.children.length){ newRow(); }
 }
