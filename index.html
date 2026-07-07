@@ -125,15 +125,15 @@
       <div>
         <label>Režim výroby</label>
         <select id="mode">
-          <option value="1.6">Výroba z tabuľky PC (+1,6 m)</option>
-          <option value="0.1">Ručný režim (+0,1 m)</option>
+          <option value="1">Výroba z tabuľky PC (+1,00 m)</option>
+          <option value="0.1">Ručný režim (+0,10 m)</option>
         </select>
       </div>
       <div>
         <label>Delenie</label>
         <select id="delenie">
           <option value="VDL">VDL</option>
-          <option value="VARIOBEND">VARIOBEND (−0,1 m)</option>
+          <option value="VARIOBEND">VARIOBEND (+0,1 m)</option>
         </select>
       </div>
     </div>
@@ -161,8 +161,8 @@
         <input id="bend" type="number" step="0.001" value="0.046" inputmode="decimal">
       </div>
       <div>
-        <label>Rezerva materiálu (%)</label>
-        <input id="reserve" type="number" step="1" value="5" inputmode="numeric">
+        <label>Rezerva materiálu (m)</label>
+        <input id="reserve" type="number" value="1.00" readonly>
       </div>
     </div>
   </div>

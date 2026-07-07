@@ -84,8 +84,11 @@ function calc(){
   const masterW = masterWmm/1000;
   const usefulW = (parseFloat($('#usefulW').value)||500)/1000;
   const bend = parseFloat($('#bend').value)||0;
-  const reserve = (parseFloat($('#reserve').value)||0)/100;
-  const delAdj = (delenie==='VARIOBEND') ? 0.1 : 0;
+  // rezerva materiálu = pevná hodnota v metroch podľa režimu výroby (1,00 m PC / 0,10 m ručne)
+  const reserveM = mode;
+  $('#reserve').value = reserveM.toFixed(2);
+  // VARIOBEND pridáva k potrebnej dĺžke zvitku +0,1 m (podľa vzorového Excelu KLIK PANEL)
+  const delenieAdj = (delenie==='VARIOBEND') ? 0.1 : 0;
 
   const items = readItems();
 
@@ -106,7 +109,7 @@ function calc(){
   const minStrip = totals.length ? Math.min(...totals) : 0;
   const diff = maxStrip - minStrip;
 
-  const masterLen = maxStrip * (1+reserve);
+  const masterLen = maxStrip + reserveM + delenieAdj;
   const matArea = masterW * masterLen;
   const usedRoll = bmBend;
   const boughtRoll = maxStrip * splits;
@@ -125,17 +128,17 @@ function calc(){
 
   $('#rSummary').innerHTML =
     `Panelov: <b>${totalPcs} ks</b> · Riadkov: ${items.length} · Paliet (VL): <b>${vlList.length}</b> · `+
-    `Režim: <b>${mode===1.6?'PC tabuľka':'Ručný'}</b> · Delenie: <b>${delenie}</b>`+
-    (delAdj?` (−0,1 m)`:``)+
+    `Režim: <b>${mode===1?'PC tabuľka':'Ručný'}</b> · Delenie: <b>${delenie}</b>`+
+    (delenieAdj?` (+0,1 m)`:``)+
     ` · Vstup ${Math.round(masterWmm)} mm → ${splits}× ${Math.round(stripWmm)} mm`+
-    ` · Rezerva ${Math.round(reserve*100)} %`;
+    ` · Rezerva ${fmt(reserveM,2)} m`;
 
   renderStrips(strips, maxStrip, stripWmm, diff);
 
   lastCalc = {
     items, pieces, strips, maxStrip, stripWmm, splits, masterWmm,
     bm, bmBend, area, matArea, masterLen, wastePct, diff, bend,
-    mode, delenie, reserve, usefulW, vlList
+    mode, delenie, reserveM, delenieAdj, usefulW, vlList
   };
 }
 
@@ -206,7 +209,7 @@ function save(){
     })),
     mode:$('#mode').value, delenie:$('#delenie').value,
     masterW:$('#masterW').value, splits:$('#splits').value,
-    usefulW:$('#usefulW').value, bend:$('#bend').value, reserve:$('#reserve').value
+    usefulW:$('#usefulW').value, bend:$('#bend').value
   };
   try{ localStorage.setItem(STORE, JSON.stringify(data)); }catch(e){}
 }
@@ -214,13 +217,16 @@ function save(){
 function load(){
   let d=null; try{ d=JSON.parse(localStorage.getItem(STORE)); }catch(e){}
   if(d){
-    $('#mode').value=d.mode||'1.6'; $('#delenie').value=d.delenie||'VDL';
+    // migrácia: staré uložené režimy mali rezervu +1,6 m / +0,1 m, správne je +1,00 m / +0,10 m
+    let mode = d.mode || '1';
+    if(String(mode)==='1.6') mode = '1';
+    $('#mode').value=mode; $('#delenie').value=d.delenie||'VDL';
     if(d.masterW) $('#masterW').value=d.masterW;
     if(d.splits) $('#splits').value=d.splits;
     // migrácia: staré uložené krytie 500 mm bolo nesprávne, správne je 536 mm (KLIK panel)
     let uw = d.usefulW || 536;
     if(String(uw)==='500') uw = 536;
-    $('#usefulW').value=uw; $('#bend').value=d.bend||0.046; $('#reserve').value=d.reserve||5;
+    $('#usefulW').value=uw; $('#bend').value=d.bend||0.046;
     (d.items||[]).forEach(r=> newRow(r.vl||'', r.name,r.len,r.qty));
   }
   if(!rowsEl.children.length){ newRow(); }
@@ -242,7 +248,7 @@ $('#addRow').onclick = ()=>{ newRow(); refresh(); };
 $('#demo').onclick = demo;
 $('#clear').onclick = ()=>{ rowsEl.innerHTML=''; vlColorMap={}; newRow(); refresh(); };
 $('#print').onclick = ()=> window.print();
-['mode','delenie','masterW','splits','usefulW','bend','reserve'].forEach(id=>
+['mode','delenie','masterW','splits','usefulW','bend'].forEach(id=>
   $('#'+id).addEventListener('input', refresh));
 
 load();
@@ -542,9 +548,6 @@ $('#exportXlsx').onclick = ()=>{
   buildXlsx(lastCalc);
 };
 
-function argbFromHex(hex){ // '#ff8a3d' -> 'FFff8a3d'
-  return 'FF' + hex.replace('#','').toUpperCase();
-}
 function buildXlsx(c){
   const wb = new ExcelJS.Workbook();
   wb.creator = 'KLIK PANEL';
@@ -561,113 +564,113 @@ function buildXlsx(c){
       cell.border = { bottom:{style:'thin', color:{argb:'FF2A5877'}} };
     });
   }
-  function fillRow(row, argb){
-    row.eachCell(cell=>{
-      cell.fill = { type:'pattern', pattern:'solid', fgColor:{argb} };
-      cell.font = { color:{argb:'FF08202F'} };
+
+  // ================= List 1: PREPOČET ZVITKOV =================
+  // Rozvrhnutie podľa vzoru "KLIK PANEL delenie materiálu": TYP / Balík / Označenie / Rozmer / Počet v balíku / balík / s rezervou.
+  const ws1 = wb.addWorksheet('Prepočet zvitkov');
+  ws1.columns = [
+    {key:'typ', width:8}, {key:'balik', width:8}, {key:'oznacenie', width:12},
+    {key:'rozmer', width:12}, {key:'pocet', width:16}, {key:'balikBm', width:12},
+    {key:'sRezervou', width:13}, {key:'vl', width:18},
+  ];
+
+  const modeLabel = c.mode===1 ? 'VÝROBA Z TABUĽKY PC' : 'VÝROBA V RUČNOM REŽIME';
+  ws1.getCell('A1').value = 'REŽIM VÝROBY'; ws1.getCell('A1').font = {bold:true, size:13};
+  ws1.mergeCells('D1:H1');
+  ws1.getCell('D1').value = modeLabel;
+  ws1.getCell('D1').font = {bold:true, size:13};
+  ws1.getCell('D1').alignment = {horizontal:'center'};
+
+  ws1.getCell('A2').value = 'Rezerva materiálu'; ws1.getCell('A2').font = {bold:true, size:13};
+  ws1.getCell('D2').value = +c.reserveM.toFixed(2);
+  ws1.getCell('D2').numFmt = '0.00';
+  ws1.getCell('E2').value = 'm';
+
+  ws1.getCell('A3').value = 'Delenie'; ws1.getCell('A3').font = {bold:true, size:13};
+  ws1.getCell('D3').value = c.delenie;
+
+  ws1.mergeCells('A4:H4');
+  ws1.getCell('A4').value = 'KLIK PANEL - DELENIE MATERIÁLU';
+  ws1.getCell('A4').font = {bold:true, size:14, color:{argb:'FFEAF3FA'}};
+  ws1.getCell('A4').alignment = {horizontal:'center'};
+  ws1.getCell('A4').fill = {type:'pattern', pattern:'solid', fgColor:{argb:HEADER_FILL}};
+
+  ws1.getCell('A5').value = 'CELKOM:'; ws1.getCell('A5').font = {bold:true, size:13};
+  ws1.getCell('C5').value = 'už.š.';
+  ws1.getCell('D5').value = +(c.bm*0.5).toFixed(2);
+  ws1.getCell('D5').numFmt = '0.00';
+  ws1.mergeCells('F5:G5');
+  ws1.getCell('F5').value = +c.area.toFixed(2);
+  ws1.getCell('F5').numFmt = '#,##0.00" m2"';
+  ws1.getCell('F5').fill = {type:'pattern', pattern:'solid', fgColor:{argb:'FFFFFF66'}};
+  ws1.getCell('F5').font = {bold:true, size:13};
+  ws1.getCell('F5').alignment = {horizontal:'right'};
+
+  const hdr = ws1.getRow(6);
+  hdr.values = ['TYP','Balík','Označenie','Rozmer','Počet v balíku','balík','/s rezervou','Výrobný list'];
+  hdr.eachCell(cell=>{ cell.font = {bold:true}; cell.alignment = {horizontal:'center'}; });
+
+  let r = 7;
+  const firstDataRow = r;
+  c.strips.forEach((s, idx)=>{
+    const gm = new Map();
+    s.items.forEach(it=>{
+      const key = it.base;
+      if(gm.has(key)){ const g=gm.get(key); g.qty+=1; g.bm+=it.len; g.vls.add(it.vl||''); }
+      else gm.set(key, {base:it.base, qty:1, bm:it.len, vls:new Set([it.vl||''])});
     });
+    const rows = [...gm.values()].sort((a,b)=>b.base-a.base);
+    const requiredLen = s.total + c.reserveM + c.delenieAdj;
+    rows.forEach((g, gi)=>{
+      const row = ws1.getRow(r);
+      row.getCell(2).value = gi===0 ? (idx+1) : null;
+      row.getCell(3).value = gi===0 ? `${idx+1}/${c.strips.length}` : '';
+      row.getCell(4).value = g.base;
+      row.getCell(5).value = g.qty;
+      row.getCell(6).value = +s.total.toFixed(2);
+      row.getCell(6).numFmt = '0.00';
+      row.getCell(7).value = +requiredLen.toFixed(2);
+      row.getCell(7).numFmt = '0.00';
+      row.getCell(7).font = {bold:true};
+      row.getCell(8).value = [...g.vls].filter(Boolean).join(', ');
+      r++;
+    });
+  });
+  const lastDataRow = r-1;
+  if(lastDataRow>=firstDataRow){
+    ws1.mergeCells(`A${firstDataRow}:A${lastDataRow}`);
+    const typCell = ws1.getCell(`A${firstDataRow}`);
+    typCell.value = c.bend>0 ? 'ZAHNUTÁ HRANA' : 'BEZ OHYBU ODKVAPOVEJ HRANY';
+    typCell.alignment = {textRotation:90, horizontal:'center', vertical:'middle'};
+    typCell.font = {bold:true};
   }
 
-  // ================= List 1: SÚPIS ROZMEROV =================
-  // Zoskupenie rovnakých rozmerov LEN v rámci toho istého VL.
-  const ws1 = wb.addWorksheet('Súpis rozmerov');
-  ws1.columns = [
-    {header:'Výrobný list', key:'vl', width:16},
-    {header:'Rozmer (mm)', key:'len', width:14},
-    {header:'Počet ks', key:'qty', width:12},
-    {header:'bm', key:'bm', width:12},
-  ];
-  styleHeaderRow(ws1.getRow(1));
-
-  const grpMap = new Map();
-  c.items.forEach(r=>{
-    const vl = r.vl || '(bez VL)';
-    const key = vl + '|' + r.len;
-    if(grpMap.has(key)) grpMap.get(key).qty += r.qty;
-    else grpMap.set(key, {vl, len:r.len, qty:r.qty});
-  });
-  const vlOrder = [];
-  c.items.forEach(r=>{ const v=r.vl||'(bez VL)'; if(!vlOrder.includes(v)) vlOrder.push(v); });
-  const supItems = [];
-  vlOrder.forEach(vl=>{
-    [...grpMap.values()].filter(g=>g.vl===vl).sort((a,b)=>b.len-a.len).forEach(g=>supItems.push(g));
-  });
-
-  supItems.forEach(g=>{
-    const bm = g.len/1000 * g.qty;
-    const row = ws1.addRow({vl:g.vl, len:g.len, qty:g.qty, bm:+bm.toFixed(2)});
-    fillRow(row, argbFromHex(vlColor(g.vl==='(bez VL)'?'':g.vl)));
-  });
-  const totQty = supItems.reduce((s,r)=>s+r.qty,0);
-  const totBm = supItems.reduce((s,r)=>s+r.len/1000*r.qty,0);
-  const totRow1 = ws1.addRow({vl:'SPOLU', len:'', qty:totQty, bm:+totBm.toFixed(2)});
-  totRow1.eachCell(cell=>{ cell.font = {bold:true}; cell.border={top:{style:'thin',color:{argb:'FF2A5877'}}}; });
-
-  // ================= List 2: ROZDELENIE NA PÁSY =================
-  const ws2 = wb.addWorksheet('Rozdelenie na pásy');
+  // ================= List 2: SÚPIS ROZMEROV =================
+  // Kontrola: koľko ks daného rozmeru bolo objednané (zo súpisu) vs. koľko sa reálne rozdelilo do balíkov.
+  const ws2 = wb.addWorksheet('Súpis rozmerov');
   ws2.columns = [
-    {header:'Pás', key:'pas', width:14},
-    {header:'Výrobný list', key:'vl', width:16},
-    {header:'Rozmer (mm)', key:'len', width:14},
-    {header:'Počet ks', key:'qty', width:12},
-    {header:'bm spolu', key:'bm', width:12},
+    {header:'', key:'a', width:6},
+    {header:'Rozmer', key:'rozmer', width:14},
+    {header:'Súčet (ks)', key:'sucet', width:14},
+    {header:'Objednané (ks)', key:'objednane', width:16},
+    {header:'Rozdiel', key:'rozdiel', width:12},
   ];
   styleHeaderRow(ws2.getRow(1));
 
-  c.strips.forEach((s,idx)=>{
-    const gm = new Map();
-    s.items.forEach(it=>{
-      const vl = it.vl || '(bez VL)';
-      const key = vl + '|' + it.base;
-      if(gm.has(key)){ const g=gm.get(key); g.qty+=1; g.bm+=it.len; }
-      else gm.set(key, {vl, base:it.base, qty:1, bm:it.len});
-    });
-    const vlSeen = [];
-    s.items.forEach(it=>{ const v=it.vl||'(bez VL)'; if(!vlSeen.includes(v)) vlSeen.push(v); });
-    vlSeen.forEach(vl=>{
-      [...gm.values()].filter(g=>g.vl===vl).sort((a,b)=>b.base-a.base).forEach(g=>{
-        const row = ws2.addRow({pas:idx+1, vl:g.vl, len:g.base, qty:g.qty, bm:+g.bm.toFixed(2)});
-        if(g.vl!=='(bez VL)') fillRow(row, argbFromHex(vlColor(g.vl)));
-      });
-    });
-    const totRow = ws2.addRow({pas:`Pás ${idx+1} spolu`, vl:'', len:'', qty:'', bm:+s.total.toFixed(2)});
-    totRow.eachCell(cell=>{ cell.font={bold:true}; });
-    ws2.addRow({}); // medzera
-  });
+  const orderedMap = new Map();
+  c.items.forEach(it=> orderedMap.set(it.len, (orderedMap.get(it.len)||0) + it.qty));
+  const assignedMap = new Map();
+  c.strips.forEach(s=> s.items.forEach(it=> assignedMap.set(it.base, (assignedMap.get(it.base)||0)+1)));
 
-  // ================= List 3: SÚHRN =================
-  const ws3 = wb.addWorksheet('Súhrn');
-  ws3.columns = [{width:34},{width:16}];
-  const titleRow = ws3.addRow(['Súhrn prepočtu','']);
-  titleRow.getCell(1).font = {bold:true, size:13};
-  const sumRows = [
-    ['Bežné metre (bm)', +c.bm.toFixed(2)],
-    ['bm s ohybom', +c.bmBend.toFixed(2)],
-    ['Krytá plocha (m²)', +c.area.toFixed(2)],
-    ['Plocha materiálu s rezervou (m²)', +c.matArea.toFixed(2)],
-    ['Dĺžka vstupného zvitku (bm)', +c.masterLen.toFixed(2)],
-    ['Odpad materiálu (%)', +c.wastePct.toFixed(1)],
-    ['Rozdiel medzi pásmi (bm)', +c.diff.toFixed(2)],
-    ['Počet pásov', c.splits],
-    ['Šírka pásu (mm)', Math.round(c.stripWmm)],
-    ['Šírka vstupného zvitku (mm)', Math.round(c.masterWmm)],
-    ['Počet paliet (VL)', c.vlList.length],
-    ['Režim', c.mode===1.6?'PC tabuľka':'Ručný'],
-    ['Delenie', c.delenie],
-    ['Rezerva (%)', Math.round(c.reserve*100)],
-    ['Ohyb (m/ks)', c.bend],
-  ];
-  sumRows.forEach(r=>{ const row=ws3.addRow(r); row.getCell(1).font={bold:false}; });
-
-  // farebná legenda VL na spodok súhrnu
-  ws3.addRow([]);
-  const legRow = ws3.addRow(['Legenda paliet (VL):','']);
-  legRow.getCell(1).font = {bold:true};
-  c.vlList.forEach(vl=>{
-    if(vl==='(bez VL)') return;
-    const row = ws3.addRow(['VL '+vl, '']);
-    row.getCell(1).fill = { type:'pattern', pattern:'solid', fgColor:{argb:argbFromHex(vlColor(vl))} };
-    row.getCell(1).font = { color:{argb:'FF08202F'}, bold:true };
+  const allLens = [...new Set([...orderedMap.keys(), ...assignedMap.keys()])].sort((a,b)=>b-a);
+  let mismatchIdx = 0;
+  allLens.forEach(len=>{
+    const sucet = assignedMap.get(len)||0;
+    const objednane = orderedMap.get(len)||0;
+    const rozdiel = objednane - sucet;
+    if(rozdiel!==0) mismatchIdx++;
+    const row = ws2.addRow({ a: rozdiel!==0?mismatchIdx:'', rozmer:len, sucet, objednane, rozdiel });
+    if(rozdiel!==0) row.eachCell(cell=>{ cell.font = {color:{argb:'FFFF6B6B'}, bold:true}; });
   });
 
   // ================= stiahnutie =================
