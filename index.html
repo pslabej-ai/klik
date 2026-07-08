@@ -397,17 +397,60 @@ function readItems(){
   })).filter(r=> r.len>0 && r.qty>0);
 }
 
-// Vyvážené rozdelenie kusov na `n` pásov (greedy LPT).
-// VL sa MÔŽU miešať na páse (cieľ = minimálny odpad), ale každý kus si nesie svoje VL.
+// Rozdelenie kusov na `n` pásov s ohľadom na ukladanie do palety:
+// najdlhšie kusy sa sústredia na skoršie pásy (aby išli na spodok palety),
+// pričom pásy zostávajú dĺžkovo čo najvyrovnanejšie (kvôli dĺžke zvitku/odpadu).
+// Postup: pás po páse sa napĺňa najdlhšími dostupnými kusmi po vyvážený cieľ;
+// keď najdlhší kus cieľ presiahne, doplní sa najdlhším, ktorý sa ešte zmestí,
+// prípadne najkratším ako výplň (mierny presah), a pokračuje ďalší pás.
+// VL sa môžu na páse miešať, ale každý kus si nesie svoje VL.
 function balanceStrips(pieces, n){
   const flat = [];
   pieces.forEach(p=>{ for(let i=0;i<p.qty;i++) flat.push({name:p.name, len:p.pieceLen, base:p.len, vl:p.vl}); });
-  flat.sort((a,b)=> b.len - a.len);
+  flat.sort((a,b)=> b.len - a.len);            // najdlhšie najskôr
+
   const strips = Array.from({length:n}, ()=>({items:[], total:0}));
-  for(const pc of flat){
-    let t = strips[0];
-    for(const s of strips){ if(s.total < t.total) t = s; }
-    t.items.push(pc); t.total += pc.len;
+  let pool = flat.slice();                      // dostupné kusy (zoradené zostupne)
+  let remainingTotal = pool.reduce((a,p)=>a+p.len, 0);
+  const EPS = 1e-9;
+
+  // index najdlhšieho kusu, ktorý sa ešte zmestí do danej medzery
+  const longestFitting = limit => {
+    for(let i=0;i<pool.length;i++){ if(pool[i].len <= limit+EPS) return i; }
+    return -1;
+  };
+
+  for(let s=0; s<n; s++){
+    const strip = strips[s];
+    const r = n - s;                            // koľko pásov ostáva vrátane tohto
+    if(r === 1){                                // posledný pás dostane všetok zvyšok
+      pool.forEach(pc=>{ strip.items.push(pc); strip.total += pc.len; });
+      pool = [];
+      break;
+    }
+    const target = remainingTotal / r;          // vyvážený cieľ pre tento pás
+    while(pool.length){
+      const L = pool[0].len;                     // najdlhší dostupný
+      if(strip.total + L <= target + EPS){       // zmestí sa pod cieľ → sústreď najdlhšie dopredu
+        const pc = pool.shift();
+        strip.items.push(pc); strip.total += pc.len; remainingTotal -= pc.len;
+        continue;
+      }
+      const gap = target - strip.total;
+      const idx = longestFitting(gap);           // skús doplniť najdlhším, čo sa ešte zmestí
+      if(idx !== -1){
+        const pc = pool.splice(idx,1)[0];
+        strip.items.push(pc); strip.total += pc.len; remainingTotal -= pc.len;
+        continue;
+      }
+      // nič sa nezmestí do medzery; ak je pás citeľne pod cieľom, doplň najkratším (mierny presah)
+      const smallest = pool[pool.length-1].len;
+      if(gap >= smallest/2){
+        const pc = pool.pop();
+        strip.items.push(pc); strip.total += pc.len; remainingTotal -= pc.len;
+      }
+      break;                                      // pás hotový → ďalší
+    }
   }
   return strips;
 }
