@@ -457,6 +457,13 @@ function balanceStrips(pieces, n){
 
 let lastCalc = null; // pre export
 
+// zoskupenie kusov podľa VL (palety) v poradí prvého výskytu; prázdne VL => kľúč ''
+function splitByVl(items){
+  const order=[]; const map={};
+  items.forEach(it=>{ const k=it.vl||''; if(!(k in map)){ map[k]=[]; order.push(k);} map[k].push(it); });
+  return order.map(k=>({vl:k, items:map[k]}));
+}
+
 function calc(){
   const mode = parseFloat($('#mode').value);
   const delenie = $('#delenie').value;
@@ -475,85 +482,107 @@ function calc(){
 
   const items = readItems();
 
-  let bm=0, bmBend=0, totalPcs=0;
-  const pieces = items.map(r=>{
-    const runm = r.len/1000 * r.qty;
-    const runmBend = runm + r.qty*bend;
-    bm += runm; bmBend += runmBend; totalPcs += r.qty;
-    const pieceLen = r.len/1000 + bend;
-    return {...r, pieceLen};
+  // Každý VL (paleta) sa delí a počíta ZVLÁŠŤ — pásy sa medzi VL nemiešajú,
+  // aby bolo jasné, ktoré rozmery patria ku ktorej palete.
+  const groups = splitByVl(items).map(g=>{
+    let gbm=0, gbmBend=0, gpcs=0;
+    const pieces = g.items.map(r=>{
+      const runm = r.len/1000 * r.qty;
+      gbm += runm; gbmBend += runm + r.qty*bend; gpcs += r.qty;
+      return {...r, pieceLen: r.len/1000 + bend};
+    });
+    const strips = pieces.length ? balanceStrips(pieces, splits) : [];
+    const totals = strips.map(s=>s.total);
+    const maxStrip = totals.length ? Math.max(...totals) : 0;
+    const minStrip = totals.length ? Math.min(...totals) : 0;
+    const coilLen = maxStrip>0 ? maxStrip + reserveM + delenieAdj : 0;
+    return {
+      vl:g.vl, items:g.items, pieces, strips,
+      bm:gbm, bmBend:gbmBend, pcs:gpcs, maxStrip, minStrip,
+      diff: maxStrip-minStrip, coilLen, area:gbm*usefulW, matArea: masterW*coilLen
+    };
   });
 
-  const area = bm * usefulW;
-
-  const strips = pieces.length ? balanceStrips(pieces, splits) : [];
-  const totals = strips.map(s=>s.total);
-  const maxStrip = totals.length ? Math.max(...totals) : 0;
-  const minStrip = totals.length ? Math.min(...totals) : 0;
-  const diff = maxStrip - minStrip;
-
-  const masterLen = maxStrip + reserveM + delenieAdj;
-  const matArea = masterW * masterLen;
+  // agregáty cez všetky palety
+  const bm      = groups.reduce((a,g)=>a+g.bm,0);
+  const bmBend  = groups.reduce((a,g)=>a+g.bmBend,0);
+  const totalPcs= groups.reduce((a,g)=>a+g.pcs,0);
+  const area    = groups.reduce((a,g)=>a+g.area,0);
+  const matArea = groups.reduce((a,g)=>a+g.matArea,0);
+  const coilLenTotal = groups.reduce((a,g)=>a+g.coilLen,0);
+  const boughtRoll = groups.reduce((a,g)=>a+g.maxStrip*splits,0);
   const usedRoll = bmBend;
-  const boughtRoll = maxStrip * splits;
   const wastePct = boughtRoll>0 ? (1 - usedRoll/boughtRoll)*100 : 0;
+  const multiVl = groups.length > 1;
 
-  // zoznam VL (unikátne, v poradí výskytu)
-  const vlList = [];
-  items.forEach(r=>{ const v=r.vl||'(bez VL)'; if(!vlList.includes(v)) vlList.push(v); });
+  const vlList = groups.map(g=> g.vl || '(bez VL)');
 
   $('#rBm').innerHTML = fmt(bm)+' <small>bm</small>';
   $('#rBmB').innerHTML = fmt(bmBend)+' <small>bm</small>';
   $('#rArea').innerHTML = fmt(area)+' <small>m²</small>';
   $('#rMat').innerHTML = fmt(matArea)+' <small>m² s rez.</small>';
-  $('#rCoilLen').innerHTML = fmt(masterLen)+' <small>bm</small>';
+  $('#rCoilLen').innerHTML = fmt(coilLenTotal)+' <small>bm'+(multiVl?' spolu':'')+'</small>';
   $('#rWaste').innerHTML = fmt(wastePct,1)+' <small>%</small>';
 
   $('#rSummary').innerHTML =
-    `Panelov: <b>${totalPcs} ks</b> · Riadkov: ${items.length} · Paliet (VL): <b>${vlList.length}</b> · `+
+    `Panelov: <b>${totalPcs} ks</b> · Riadkov: ${items.length} · Paliet (VL): <b>${groups.length}</b> · `+
     `Režim: <b>${mode===1?'PC tabuľka':'Ručný'}</b> · Delenie: <b>${delenie}</b>`+
     (delenieAdj?` (+0,1 m)`:``)+
     ` · Vstup ${Math.round(masterWmm)} mm → ${splits}× ${Math.round(stripWmm)} mm`+
-    ` · Rezerva ${fmt(reserveM,2)} m`;
+    ` · Rezerva ${fmt(reserveM,2)} m`+
+    (multiVl?` · <b>každá paleta zvlášť</b>`:``);
 
-  renderStrips(strips, maxStrip, stripWmm, diff);
+  renderStrips(groups, stripWmm, multiVl);
 
   lastCalc = {
-    items, pieces, strips, maxStrip, stripWmm, splits, masterWmm,
-    bm, bmBend, area, matArea, masterLen, wastePct, diff, bend,
+    items, groups, multiVl, stripWmm, splits, masterWmm, masterW,
+    bm, bmBend, area, matArea, coilLenTotal, wastePct, bend,
     mode, delenie, reserveM, delenieAdj, usefulW, vlList
   };
 }
 
-function renderStrips(strips, maxLen, stripWmm, diff){
+// Náhľad pásov — pre každý VL (paletu) samostatná sekcia s vlastnými pásmi.
+function renderStrips(groups, stripWmm, multiVl){
   const box = $('#cutlist');
-  if(!strips.length || maxLen<=0){
+  const nonEmpty = groups.filter(g=>g.strips.length && g.maxStrip>0);
+  if(!nonEmpty.length){
     box.innerHTML = '<div style="color:var(--muted);font-size:.85rem">Zatiaľ žiadne dáta.</div>'; return;
   }
 
-  let html = `<div class="foot" style="margin:0 0 10px">`+
-    `<span>Rozdiel medzi pásmi: <b style="color:${diff<=0.001?'var(--accent2)':'var(--accent)'}">${fmt(diff)} bm</b> <small>(cieľ: čo najmenej)</small></span>`+
-    `</div>`;
-
-  strips.forEach((s,idx)=>{
-    const waste = Math.max(0, maxLen - s.total);
-    let segs='';
-    s.items.forEach(it=>{
-      const w = (it.len/maxLen*100);
-      const col = vlColor(it.vl);
-      const vlLbl = it.vl ? `VL ${it.vl}` : 'bez VL';
-      segs += `<div class="seg" style="width:${w}%;background:${col}" title="${vlLbl} · ${it.name||'panel'} · ${it.base} mm">${it.base}</div>`;
-    });
-    if(waste>0.001){
-      segs += `<div class="seg waste" style="width:${waste/maxLen*100}%">odpad ${fmt(waste)} m</div>`;
+  let html = '';
+  nonEmpty.forEach(g=>{
+    const col = vlColor(g.vl);
+    const maxLen = g.maxStrip;
+    if(multiVl){
+      html += `<div style="margin:14px 0 6px;display:flex;align-items:center;gap:8px">`+
+        `<span style="display:inline-block;width:14px;height:14px;border-radius:3px;background:${col};border:1px solid rgba(255,255,255,.3)"></span>`+
+        `<b style="color:var(--ink)">Výrobný list ${g.vl||'(bez VL)'}</b>`+
+        `<span style="color:var(--muted);font-size:.78rem">${fmt(g.area)} m² · zvitok ${fmt(g.coilLen)} bm · rozdiel ${fmt(g.diff)} bm</span>`+
+        `</div>`;
+    } else {
+      html += `<div class="foot" style="margin:0 0 10px"><span>Rozdiel medzi pásmi: `+
+        `<b style="color:${g.diff<=0.001?'var(--accent2)':'var(--accent)'}">${fmt(g.diff)} bm</b> `+
+        `<small>(cieľ: čo najmenej)</small></span></div>`;
     }
-    html += `<div class="coil">
-       <div class="head">
-         <span><b style="color:var(--ink)">Pás ${idx+1}</b> · ${Math.round(stripWmm)} mm · ${s.items.length} ks</span>
-         <span>${fmt(s.total)} bm</span>
-       </div>
-       <div class="bar">${segs}</div>
-     </div>`;
+    g.strips.forEach((s,idx)=>{
+      const waste = Math.max(0, maxLen - s.total);
+      let segs='';
+      s.items.forEach(it=>{
+        const w = (it.len/maxLen*100);
+        const vlLbl = it.vl ? `VL ${it.vl}` : 'bez VL';
+        segs += `<div class="seg" style="width:${w}%;background:${col}" title="${vlLbl} · ${it.name||'panel'} · ${it.base} mm">${it.base}</div>`;
+      });
+      if(waste>0.001){
+        segs += `<div class="seg waste" style="width:${waste/maxLen*100}%">odpad ${fmt(waste)} m</div>`;
+      }
+      html += `<div class="coil">
+         <div class="head">
+           <span><b style="color:var(--ink)">Pás ${idx+1}</b> · ${Math.round(stripWmm)} mm · ${s.items.length} ks</span>
+           <span>${fmt(s.total)} bm</span>
+         </div>
+         <div class="bar">${segs}</div>
+       </div>`;
+    });
   });
 
   box.innerHTML = html;
@@ -963,22 +992,15 @@ function buildXlsx(c){
   // ================= List 1: PREPOČET ZVITKOV =================
   // Rozvrhnutie podľa vzoru "KLIK PANEL delenie materiálu": TYP / Balík / Označenie / Rozmer / Počet v balíku / balík / s rezervou.
   const ws1 = wb.addWorksheet('Prepočet zvitkov');
+  const lastCol = 'G';                          // stĺpec VL nie je potrebný — VL je nadpis sekcie
+  const hexArgb = hex => 'FF' + hex.replace('#','').toUpperCase();
 
-  // stĺpec "Výrobný list" má zmysel len pri viac ako jednom výrobnom liste;
-  // ak je zákazka z jedného VL (alebo bez VL), stĺpec sa vynechá
-  const vlDistinct = [...new Set(c.items.map(it=>it.vl).filter(Boolean))];
-  const showVl = vlDistinct.length > 1;
-  const lastCol = showVl ? 'H' : 'G';
-
-  // šírky stĺpcov prispôsobené nápisom v hlavičke pri písme Arial 14 (tučné),
-  // aby bol každý nápis v 6. riadku celý viditeľný
-  const cols = [
+  // šírky stĺpcov prispôsobené nápisom v hlavičke pri písme Arial 14 (tučné)
+  ws1.columns = [
     {key:'typ', width:12}, {key:'balik', width:10}, {key:'oznacenie', width:16},
-    {key:'rozmer', width:14}, {key:'pocet', width:20}, {key:'balikBm', width:12},
-    {key:'sRezervou', width:17},
+    {key:'rozmer', width:16}, {key:'pocet', width:20}, {key:'balikBm', width:14},
+    {key:'sRezervou', width:16},
   ];
-  if(showVl) cols.push({key:'vl', width:20});
-  ws1.columns = cols;
 
   const modeLabel = c.mode===1 ? 'VÝROBA Z TABUĽKY PC' : 'VÝROBA V RUČNOM REŽIME';
   ws1.getCell('A1').value = 'REŽIM VÝROBY'; ws1.getCell('A1').font = {bold:true, size:13};
@@ -1013,58 +1035,63 @@ function buildXlsx(c){
   ws1.getCell('F5').alignment = {horizontal:'right'};
 
   const hdr = ws1.getRow(6);
-  const hdrVals = ['TYP','Balík','Označenie','Rozmer','Počet v balíku','balík','/s rezervou'];
-  if(showVl) hdrVals.push('Výrobný list');
-  hdr.values = hdrVals;
+  hdr.values = ['TYP','Balík','Označenie','Rozmer','Počet v balíku','balík','/s rezervou'];
   hdr.eachCell(cell=>{ cell.font = {bold:true}; cell.alignment = {horizontal:'center'}; });
 
+  // Každá paleta (VL) ako samostatný blok, oddelený farebným nadpisom a prázdnym riadkom.
   let r = 7;
-  const firstDataRow = r;
-  c.strips.forEach((s, idx)=>{
-    const gm = new Map();
-    s.items.forEach(it=>{
-      const key = it.base;
-      if(gm.has(key)){ const g=gm.get(key); g.qty+=1; g.bm+=it.len; g.vls.add(it.vl||''); }
-      else gm.set(key, {base:it.base, qty:1, bm:it.len, vls:new Set([it.vl||''])});
-    });
-    const rows = [...gm.values()].sort((a,b)=>b.base-a.base);
-    const requiredLen = s.total + c.reserveM + c.delenieAdj;
-    rows.forEach((g, gi)=>{
-      const row = ws1.getRow(r);
-      row.getCell(2).value = gi===0 ? (idx+1) : null;
-      row.getCell(3).value = gi===0 ? `${idx+1}/${c.strips.length}` : '';
-      row.getCell(4).value = g.base;
-      row.getCell(4).font = {bold:true};
-      row.getCell(5).value = g.qty;
-      row.getCell(5).font = {bold:true};
-      row.getCell(6).value = +s.total.toFixed(2);
-      row.getCell(6).numFmt = '0.00';
-      row.getCell(7).value = +requiredLen.toFixed(2);
-      row.getCell(7).numFmt = '0.00';
-      row.getCell(7).font = {bold:true};
-      const vlArr = [...g.vls].filter(Boolean);
-      if(showVl) row.getCell(8).value = vlArr.join(', ');
-      // farebné zvýraznenie rozmeru podľa výrobného listu (rovnaká paleta ako v appke)
-      if(vlArr.length){
-        const argb = 'FF' + vlColor(vlArr[0]).replace('#','').toUpperCase();
-        const colorCells = showVl ? [4,8] : [4];
-        colorCells.forEach(ci=>{
-          row.getCell(ci).fill = {type:'pattern', pattern:'solid', fgColor:{argb}};
-        });
-      }
+  c.groups.forEach((grp)=>{
+    if(!grp.strips.length || grp.maxStrip<=0) return;
+    const argb = hexArgb(vlColor(grp.vl));
+
+    if(c.multiVl){
+      ws1.mergeCells(`A${r}:${lastCol}${r}`);
+      const sep = ws1.getCell(`A${r}`);
+      sep.value = `VÝROBNÝ LIST ${grp.vl||'(bez VL)'}   —   ${grp.area.toFixed(2)} m²   ·   zvitok ${grp.coilLen.toFixed(2)} bm`;
+      sep.font = {bold:true, color:{argb:'FF08202F'}};
+      sep.alignment = {horizontal:'left', vertical:'middle'};
+      sep.fill = {type:'pattern', pattern:'solid', fgColor:{argb}};
       r++;
+    }
+
+    const grpFirst = r;
+    grp.strips.forEach((s, idx)=>{
+      const gm = new Map();
+      s.items.forEach(it=>{
+        const key = it.base;
+        if(gm.has(key)){ gm.get(key).qty += 1; }
+        else gm.set(key, {base:it.base, qty:1});
+      });
+      const rows = [...gm.values()].sort((a,b)=>b.base-a.base);
+      const requiredLen = s.total + c.reserveM + c.delenieAdj;
+      rows.forEach((g, gi)=>{
+        const row = ws1.getRow(r);
+        row.getCell(2).value = gi===0 ? (idx+1) : null;
+        row.getCell(3).value = gi===0 ? `${idx+1}/${grp.strips.length}` : '';
+        row.getCell(4).value = g.base;
+        row.getCell(4).font = {bold:true};
+        row.getCell(4).fill = {type:'pattern', pattern:'solid', fgColor:{argb}};  // rozmer farebne podľa palety
+        row.getCell(5).value = g.qty;
+        row.getCell(5).font = {bold:true};
+        row.getCell(6).value = +s.total.toFixed(2);
+        row.getCell(6).numFmt = '0.00';
+        row.getCell(7).value = +requiredLen.toFixed(2);
+        row.getCell(7).numFmt = '0.00';
+        row.getCell(7).font = {bold:true};
+        r++;
+      });
+      if(idx < grp.strips.length-1){ r++; } // prázdny riadok medzi balíkmi
     });
-    // jeden prázdny riadok medzi balíkmi (medzi 1. a 2. balíkom atď.)
-    if(idx < c.strips.length-1){ r++; }
+    const grpLast = r-1;
+    if(grpLast>=grpFirst){
+      ws1.mergeCells(`A${grpFirst}:A${grpLast}`);
+      const typCell = ws1.getCell(`A${grpFirst}`);
+      typCell.value = c.bend>0 ? 'ZAHNUTÁ HRANA' : 'BEZ OHYBU ODKVAPOVEJ HRANY';
+      typCell.alignment = {textRotation:90, horizontal:'center', vertical:'middle'};
+      typCell.font = {bold:true};
+    }
+    r++; // prázdny riadok medzi paletami
   });
-  const lastDataRow = r-1;
-  if(lastDataRow>=firstDataRow){
-    ws1.mergeCells(`A${firstDataRow}:A${lastDataRow}`);
-    const typCell = ws1.getCell(`A${firstDataRow}`);
-    typCell.value = c.bend>0 ? 'ZAHNUTÁ HRANA' : 'BEZ OHYBU ODKVAPOVEJ HRANY';
-    typCell.alignment = {textRotation:90, horizontal:'center', vertical:'middle'};
-    typCell.font = {bold:true};
-  }
 
   // ================= List 2: SÚPIS ROZMEROV =================
   // Kontrola: koľko ks daného rozmeru bolo objednané (zo súpisu) vs. koľko sa reálne rozdelilo do balíkov.
@@ -1081,7 +1108,7 @@ function buildXlsx(c){
   const orderedMap = new Map();
   c.items.forEach(it=> orderedMap.set(it.len, (orderedMap.get(it.len)||0) + it.qty));
   const assignedMap = new Map();
-  c.strips.forEach(s=> s.items.forEach(it=> assignedMap.set(it.base, (assignedMap.get(it.base)||0)+1)));
+  c.groups.forEach(grp=> grp.strips.forEach(s=> s.items.forEach(it=> assignedMap.set(it.base, (assignedMap.get(it.base)||0)+1))));
 
   const allLens = [...new Set([...orderedMap.keys(), ...assignedMap.keys()])].sort((a,b)=>b-a);
   let mismatchIdx = 0;
@@ -1112,7 +1139,7 @@ function buildXlsx(c){
       orientation: 'portrait',
       fitToPage: true,
       fitToWidth: 1,             // všetky stĺpce na 1 stranu na šírku
-      fitToHeight: 1,            // celá tabuľka na 1 stranu aj na výšku
+      fitToHeight: c.multiVl ? 0 : 1, // 1 paleta = 1 strana; viac paliet môže pretiecť na ďalšie strany (čitateľnosť)
       horizontalCentered: true,
       margins: { left:0.3, right:0.3, top:0.4, bottom:0.4, header:0.2, footer:0.2 }
     };
@@ -1143,58 +1170,55 @@ function exportPdf(c){
   const esc = s => String(s==null?'':s).replace(/[&<>]/g, m=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[m]));
   const num = (n,d=2)=> (isFinite(n)?n:0).toLocaleString('sk-SK',{minimumFractionDigits:d,maximumFractionDigits:d});
 
-  const vlDistinct = [...new Set(c.items.map(it=>it.vl).filter(Boolean))];
-  const showVl = vlDistinct.length > 1;
   const modeLabel = c.mode===1 ? 'VÝROBA Z TABUĽKY PC' : 'VÝROBA V RUČNOM REŽIME';
   const typLabel = c.bend>0 ? 'ZAHNUTÁ HRANA' : 'BEZ OHYBU ODKVAPOVEJ HRANY';
+  const groups = c.groups.filter(g=>g.strips.length && g.maxStrip>0);
 
-  // zoskupenie rovnaké ako v Exceli
-  const groups = c.strips.map(s=>{
-    const gm = new Map();
-    s.items.forEach(it=>{
-      const k = it.base;
-      if(gm.has(k)){ const g=gm.get(k); g.qty++; g.vls.add(it.vl||''); }
-      else gm.set(k, {base:it.base, qty:1, vls:new Set([it.vl||''])});
+  // tabuľka pre jednu paletu (VL) — TYP je zlúčený zvislý pruh, prázdny riadok medzi balíkmi
+  function groupTableHtml(grp){
+    const dimStyle = `background:${vlColor(grp.vl)};`;
+    const stripInfos = grp.strips.map(s=>{
+      const gm = new Map();
+      s.items.forEach(it=>{ const k=it.base; if(gm.has(k)) gm.get(k).qty++; else gm.set(k,{base:it.base,qty:1}); });
+      return { rows:[...gm.values()].sort((a,b)=>b.base-a.base), total:s.total, req:s.total + c.reserveM + c.delenieAdj };
     });
-    return { rows:[...gm.values()].sort((a,b)=>b.base-a.base), total:s.total, req:s.total + c.reserveM + c.delenieAdj };
-  });
-  const totalDataRows = groups.reduce((a,g)=>a+g.rows.length,0) + Math.max(0, groups.length-1);
-
-  const colCount = showVl ? 8 : 7;
-
-  // telo tabuľky
-  let body = '';
-  let typPlaced = false;
-  groups.forEach((g, si)=>{
-    g.rows.forEach((row, gi)=>{
-      const vlArr = [...row.vls].filter(Boolean);
-      const col = vlArr.length ? vlColor(vlArr[0]) : '';
-      const dimStyle = col ? `background:${col};` : '';
-      let tds = '';
-      if(!typPlaced){
-        tds += `<td class="typ" rowspan="${totalDataRows}"><span>${esc(typLabel)}</span></td>`;
-        typPlaced = true;
+    const totalDataRows = stripInfos.reduce((a,s)=>a+s.rows.length,0) + Math.max(0, stripInfos.length-1);
+    let body=''; let typPlaced=false;
+    stripInfos.forEach((s, si)=>{
+      s.rows.forEach((row, gi)=>{
+        let tds='';
+        if(!typPlaced){ tds += `<td class="typ" rowspan="${totalDataRows}"><span>${esc(typLabel)}</span></td>`; typPlaced=true; }
+        tds += `<td class="c">${gi===0 ? (si+1) : ''}</td>`;
+        tds += `<td class="c">${gi===0 ? `${si+1}/${grp.strips.length}` : ''}</td>`;
+        tds += `<td class="c b" style="${dimStyle}">${row.base}</td>`;
+        tds += `<td class="c b">${row.qty}</td>`;
+        tds += `<td class="r">${num(s.total)}</td>`;
+        tds += `<td class="r b">${num(s.req)}</td>`;
+        body += `<tr>${tds}</tr>`;
+      });
+      if(si < stripInfos.length-1){
+        let e=''; for(let k=0;k<6;k++) e += `<td>&nbsp;</td>`;
+        body += `<tr class="gap">${e}</tr>`;
       }
-      tds += `<td class="c">${gi===0 ? (si+1) : ''}</td>`;                       // Balík
-      tds += `<td class="c">${gi===0 ? `${si+1}/${c.strips.length}` : ''}</td>`;  // Označenie
-      tds += `<td class="c b" style="${dimStyle}">${row.base}</td>`;              // Rozmer
-      tds += `<td class="c b">${row.qty}</td>`;
-      tds += `<td class="r">${num(g.total)}</td>`;
-      tds += `<td class="r b">${num(g.req)}</td>`;
-      if(showVl) tds += `<td class="c" style="${dimStyle}">${esc(vlArr.join(', '))}</td>`;
-      body += `<tr>${tds}</tr>`;
     });
-    if(si < groups.length-1){
-      // prázdny riadok medzi balíkmi (TYP stĺpec je pokrytý rowspanom)
-      let empt = '';
-      for(let k=0;k<colCount-1;k++) empt += `<td>&nbsp;</td>`;
-      body += `<tr class="gap">${empt}</tr>`;
-    }
-  });
+    const head = ['TYP','Balík','Označenie','Rozmer','Počet v balíku','balík','/s rezervou']
+      .map(h=>`<th>${esc(h)}</th>`).join('');
+    return `<table class="main">
+      <colgroup><col class="w-typ"><col class="w-balik"><col class="w-ozn"><col class="w-rozmer">`+
+      `<col class="w-pocet"><col class="w-balikbm"><col class="w-rez"></colgroup>
+      <thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>`;
+  }
 
-  const headCells = ['TYP','Balík','Označenie','Rozmer','Počet v balíku','balík','/s rezervou']
-    .concat(showVl?['Výrobný list']:[])
-    .map(h=>`<th>${esc(h)}</th>`).join('');
+  // každá paleta (VL) ako samostatný blok, pri viacerých VL s farebným nadpisom
+  const blocks = groups.map(grp=>{
+    let h = `<div class="vlblock">`;
+    if(c.multiVl){
+      h += `<div class="vlbar" style="background:${vlColor(grp.vl)}">`+
+        `VÝROBNÝ LIST ${esc(grp.vl||'(bez VL)')} &nbsp;—&nbsp; ${num(grp.area)} m² &nbsp;·&nbsp; zvitok ${num(grp.coilLen)} bm</div>`;
+    }
+    h += groupTableHtml(grp) + `</div>`;
+    return h;
+  }).join('');
 
   const html = `<!DOCTYPE html><html lang="sk"><head><meta charset="UTF-8">
 <title>KLIK PANEL — delenie materiálu</title>
@@ -1220,6 +1244,11 @@ function exportPdf(c){
   table.main td.r { text-align:right; }
   table.main td.b { font-weight:bold; }
   table.main tr.gap td { border:none; height:10px; }
+  /* blok jednej palety (VL) — nedeliť medzi strany */
+  .vlblock { page-break-inside:avoid; margin-top:12px; }
+  .vlbar { font-weight:bold; color:#08202f; padding:4px 8px; font-size:13px;
+    border:1px solid #2A5877; border-bottom:none; }
+  .vlblock table.main { margin-top:0; }
   /* úzky pruh "ZAHNUTÁ HRANA" len pri okraji */
   td.typ { text-align:center; vertical-align:middle; font-weight:bold; padding:0; }
   td.typ span { writing-mode:vertical-rl; transform:rotate(180deg); white-space:nowrap;
@@ -1239,14 +1268,7 @@ function exportPdf(c){
   <table class="celkom">
     <tr><td>CELKOM:</td><td>už.š.</td><td>${num(c.bm*0.5)}</td><td class="area">${num(c.area)} m2</td></tr>
   </table>
-  <table class="main">
-    <colgroup>
-      <col class="w-typ"><col class="w-balik"><col class="w-ozn"><col class="w-rozmer">
-      <col class="w-pocet"><col class="w-balikbm"><col class="w-rez">${showVl?'<col class="w-vl">':''}
-    </colgroup>
-    <thead><tr>${headCells}</tr></thead>
-    <tbody>${body}</tbody>
-  </table>
+  ${blocks}
 </div>
 <script>
   window.onload = function(){ window.focus(); window.print(); };
