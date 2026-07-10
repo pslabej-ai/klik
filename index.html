@@ -1045,11 +1045,14 @@ function buildXlsx(c){
       if(g.vl) row.getCell(4).fill = {type:'pattern', pattern:'solid', fgColor:{argb}}; // rozmer farebne podľa palety
       row.getCell(5).value = g.qty;
       row.getCell(5).font = {bold:true};
-      row.getCell(6).value = +s.total.toFixed(2);
-      row.getCell(6).numFmt = '0.00';
-      row.getCell(7).value = +requiredLen.toFixed(2);
-      row.getCell(7).numFmt = '0.00';
-      row.getCell(7).font = {bold:true};
+      // "balík" a "/s rezervou" stačí uviesť len v prvom riadku balíka
+      if(gi===0){
+        row.getCell(6).value = +s.total.toFixed(2);
+        row.getCell(6).numFmt = '0.00';
+        row.getCell(7).value = +requiredLen.toFixed(2);
+        row.getCell(7).numFmt = '0.00';
+        row.getCell(7).font = {bold:true};
+      }
       if(showVl){
         row.getCell(8).value = g.vl;
         if(g.vl) row.getCell(8).fill = {type:'pattern', pattern:'solid', fgColor:{argb}};
@@ -1168,8 +1171,8 @@ function exportPdf(c){
       tds += `<td class="c">${gi===0 ? `${si+1}/${c.strips.length}` : ''}</td>`;
       tds += `<td class="c b" style="${dimStyle}">${g.base}</td>`;
       tds += `<td class="c b">${g.qty}</td>`;
-      tds += `<td class="r">${num(s.total)}</td>`;
-      tds += `<td class="r b">${num(s.req)}</td>`;
+      tds += `<td class="r">${gi===0 ? num(s.total) : ''}</td>`;
+      tds += `<td class="r b">${gi===0 ? num(s.req) : ''}</td>`;
       if(showVl) tds += `<td class="c" style="${dimStyle}">${esc(g.vl)}</td>`;
       body += `<tr>${tds}</tr>`;
     });
